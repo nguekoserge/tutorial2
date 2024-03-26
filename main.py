@@ -1,10 +1,12 @@
 from constructs import Construct
 from cdktf import App, TerraformStack, TerraformOutput
 from cdktf_cdktf_provider_aws.provider import AwsProvider
-from cdktf_cdktf_provider_aws.instance import Instance
 from cdktf_cdktf_provider_aws.security_group import SecurityGroup
 from cdktf_cdktf_provider_aws.vpc import Vpc
-from cdktf_cdktf_provider_aws.subnet import Subnet  # Import the Subnet class
+from cdktf_cdktf_provider_aws.subnet import Subnet
+from cdktf_cdktf_provider_aws.instance import Instance
+from imports.aws.vpc_security_group_egress_rule import VpcSecurityGroupEgressRule
+from imports.aws.vpc_security_group_ingress_rule import VpcSecurityGroupIngressRule
 
 class WebsiteStack(TerraformStack):
     def __init__(self, scope: Construct, ns: str):
@@ -24,27 +26,25 @@ class WebsiteStack(TerraformStack):
                         vpc_id=vpc.id,
                         cidr_block='10.0.1.0/24')  # Adjust the CIDR block as needed
 
-        # Define the Security Group without ingress and egress rules
-       # Define the Security Group with specific ingress and egress rules
-security_group = SecurityGroup(self, 'WebServerSecurityGroup',
-                               vpc_id=vpc.id,
-                               ingress=[{
-                                   'from_port': 80,
-                                   'to_port': 80,
-                                   'protocol': 'tcp',
-                                   'cidr_blocks': ['0.0.0.0/0']
-                               }, {
-                                   'from_port': 443,
-                                   'to_port': 443,
-                                   'protocol': 'tcp',
-                                   'cidr_blocks': ['0.0.0.0/0']
-                               }],
-                               egress=[{
-                                   'from_port': 0,
-                                   'to_port': 0,
-                                   'protocol': '-1',
-                                   'cidr_blocks': ['0.0.0.0/0']
-                               }])
+        # Define the Security Group for the web server
+        web_server_sg = SecurityGroup(self, "WebServerSG",
+                                      vpc_id=vpc.id)
+
+        # Add ingress rule to allow inbound HTTP traffic
+        VpcSecurityGroupIngressRule(self, 'IngressRule',
+                                    cidr_ipv4="0.0.0.0/0",
+                                    from_port=80,
+                                    ip_protocol="tcp",
+                                    security_group_id=web_server_sg.id,
+                                    to_port=80)
+
+        # Add egress rule to allow all outbound traffic
+        VpcSecurityGroupEgressRule(self, 'EgressRule',
+                                   cidr_ipv4="0.0.0.0/0",
+                                   from_port=0,
+                                   ip_protocol="-1",
+                                   security_group_id=web_server_sg.id,
+                                   to_port=0)
 
         # Define the EC2 instance
         instance = Instance(self, 'WebServer',
@@ -58,7 +58,7 @@ security_group = SecurityGroup(self, 'WebServerSecurityGroup',
                             sudo service httpd start
                             echo "<h1>Welcome to my website!</h1>" > /var/www/html/index.html
                             """,
-                            security_groups=[security_group.id],
+                            security_groups=[web_server_sg.id],
                             subnet_id=subnet.id)  # Use the ID of the subnet you created
 
         # Output the public IP of the instance
